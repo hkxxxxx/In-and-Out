@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>In-and-Out 设置</title>
+    <link rel="stylesheet" href="options.css">
+  </head>
+  <body>
+    <main>
+      <section class="panel">
+        <p class="eyebrow">In-and-Out</p>
+        <h1>黑洞网站设置</h1>
+        <form id="settings-form">
+          <label>
+            <span>默认倒计时（分钟）</span>
+            <input id="minutes" type="number" min="1" max="240" step="1">
+          </label>
+          <label>
+            <span>需要拦截的网站，每行一个域名</span>
+            <textarea id="sites" rows="8" spellcheck="false"></textarea>
+          </label>
+          <div class="actions">
+            <button type="submit">保存</button>
+            <span id="status" role="status"></span>
+          </div>
+        </form>
+      </section>
+    </main>
+    <script src="options.js"></script>
+  </body>
+</html>

@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "In-and-Out",
+  "description": "Enter distracting sites with a clear purpose, a visible timer, and an automatic exit.",
+  "version": "0.1.1",
+  "permissions": ["alarms", "storage", "tabs"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "css": ["styles.css"],
+      "run_at": "document_start"
+    }
+  ],
+  "options_page": "options.html",
+  "action": {
+    "default_title": "In-and-Out"
+  }
+}
