@@ -25,8 +25,11 @@ async function init() {
 }
 
 function showGate(settings) {
-  waitForBody(() => {
+  waitForBody(async () => {
     document.documentElement.classList.add("in-and-out-locked");
+
+    const historyResponse = await sendMessage({ type: "getPurposeHistory" });
+    const history = historyResponse?.history || [];
 
     const root = document.createElement("div");
     root.id = ROOT_ID;
@@ -36,6 +39,7 @@ function showGate(settings) {
         <div class="iao-kicker">In-and-Out</div>
         <label class="iao-title" for="iao-purpose">你来这里是为了干什么？</label>
         <textarea id="iao-purpose" class="iao-purpose" maxlength="120" rows="2" placeholder="例如：查一个 B 站代码教程"></textarea>
+        <div class="iao-history" id="iao-history"></div>
         <div class="iao-row">
           <label class="iao-minutes-label" for="iao-minutes">分钟</label>
           <input id="iao-minutes" class="iao-minutes" type="number" min="1" max="240" step="1" value="${escapeHtml(settings.minutes)}">
@@ -49,6 +53,20 @@ function showGate(settings) {
     const form = root.querySelector("form");
     const purposeInput = root.querySelector("#iao-purpose");
     const minutesInput = root.querySelector("#iao-minutes");
+
+    const historyContainer = root.querySelector("#iao-history");
+    history.forEach((text) => {
+      const tag = document.createElement("button");
+      tag.type = "button";
+      tag.className = "iao-history-tag";
+      tag.textContent = text;
+      tag.addEventListener("click", () => {
+        purposeInput.value = text;
+        purposeInput.focus();
+      });
+      historyContainer.appendChild(tag);
+    });
+
     purposeInput.focus();
 
     form.addEventListener("submit", async (event) => {
@@ -88,18 +106,48 @@ function showBanner(session) {
         </div>
       </div>
       <div class="iao-actions">
+        <button type="button" data-reduce="3">-3</button>
+        <button type="button" data-reduce="5">-5</button>
         <button type="button" data-extend="3">+3</button>
         <button type="button" data-extend="5">+5</button>
         <button type="button" data-finish>结束</button>
       </div>
     `;
 
+    const collapseToggle = document.createElement("button");
+    collapseToggle.type = "button";
+    collapseToggle.className = "iao-collapse-toggle";
+    collapseToggle.setAttribute("aria-label", "折叠");
+    collapseToggle.innerHTML = `<svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+      <path d="M5.5 3L9.5 7L5.5 11" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>`;
+    banner.appendChild(collapseToggle);
+
     document.documentElement.append(banner);
     banner.querySelector(".iao-goal").textContent = session.purpose;
-    restoreBannerPosition(banner);
-    makeBannerDraggable(banner);
+
+    if (readBannerCollapsed()) {
+      banner.classList.add("iao-collapsed");
+    }
+
+    collapseToggle.addEventListener("click", () => {
+      banner.classList.toggle("iao-collapsed");
+      saveBannerCollapsed(banner.classList.contains("iao-collapsed"));
+    });
 
     banner.addEventListener("click", async (event) => {
+      const reduce = event.target.closest("[data-reduce]");
+      if (reduce) {
+        const response = await sendMessage({
+          type: "reduceSession",
+          minutes: reduce.dataset.reduce
+        });
+        if (response?.ok) {
+          startCountdown(banner, response.session);
+        }
+        return;
+      }
+
       const extend = event.target.closest("[data-extend]");
       if (extend) {
         const response = await sendMessage({
@@ -118,77 +166,33 @@ function showBanner(session) {
     });
 
     startCountdown(banner, session);
+
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== "session") return;
+      const domain = location.hostname.toLowerCase().replace(/^www\./, "");
+      const key = `site:${domain}`;
+      if (!changes[key]) return;
+      const updated = changes[key].newValue;
+      if (updated && updated.endTime > Date.now()) {
+        banner.querySelector(".iao-goal").textContent = updated.purpose;
+        startCountdown(banner, updated);
+      }
+    });
   });
 }
 
-function makeBannerDraggable(banner) {
-  const handle = banner.querySelector(".iao-banner-main");
-  if (!handle) return;
 
-  handle.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0) return;
-
-    const rect = banner.getBoundingClientRect();
-    const shiftX = event.clientX - rect.left;
-    const shiftY = event.clientY - rect.top;
-    banner.setPointerCapture?.(event.pointerId);
-    banner.classList.add("iao-dragging");
-
-    const move = (moveEvent) => {
-      const width = banner.offsetWidth;
-      const height = banner.offsetHeight;
-      const left = clamp(moveEvent.clientX - shiftX, 8, window.innerWidth - width - 8);
-      const top = clamp(moveEvent.clientY - shiftY, 8, window.innerHeight - height - 8);
-      placeBanner(banner, left, top);
-    };
-
-    const stop = () => {
-      banner.classList.remove("iao-dragging");
-      saveBannerPosition(banner);
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", stop);
-      window.removeEventListener("pointercancel", stop);
-    };
-
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", stop, { once: true });
-    window.addEventListener("pointercancel", stop, { once: true });
-  });
-}
-
-function restoreBannerPosition(banner) {
-  const saved = readBannerPosition();
-  if (!saved) return;
-
-  const left = clamp(saved.left, 8, window.innerWidth - banner.offsetWidth - 8);
-  const top = clamp(saved.top, 8, window.innerHeight - banner.offsetHeight - 8);
-  placeBanner(banner, left, top);
-}
-
-function placeBanner(banner, left, top) {
-  banner.style.left = `${left}px`;
-  banner.style.top = `${top}px`;
-  banner.style.right = "auto";
-  banner.style.bottom = "auto";
-}
-
-function saveBannerPosition(banner) {
-  const rect = banner.getBoundingClientRect();
+function saveBannerCollapsed(collapsed) {
   try {
-    localStorage.setItem("in-and-out-position", JSON.stringify({
-      left: Math.round(rect.left),
-      top: Math.round(rect.top)
-    }));
-  } catch {
-    // Some pages disable localStorage. Dragging should still work for the current page.
-  }
+    localStorage.setItem("in-and-out-collapsed", collapsed ? "1" : "");
+  } catch {}
 }
 
-function readBannerPosition() {
+function readBannerCollapsed() {
   try {
-    return JSON.parse(localStorage.getItem("in-and-out-position"));
+    return localStorage.getItem("in-and-out-collapsed") === "1";
   } catch {
-    return null;
+    return false;
   }
 }
 
@@ -204,6 +208,8 @@ function startCountdown(banner, session) {
     if (remaining <= 0 && !ringing) {
       ringing = true;
       ringBell();
+      banner.classList.remove("iao-collapsed");
+      saveBannerCollapsed(false);
       banner.classList.add("iao-expired");
       setTimeout(() => sendMessage({ type: "finishNow" }), 900);
     }
@@ -228,10 +234,6 @@ function formatRemaining(milliseconds) {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
-function clamp(value, min, max) {
-  if (max < min) return min;
-  return Math.min(max, Math.max(min, value));
-}
 
 function waitForBody(callback) {
   if (document.body) {
